@@ -202,6 +202,7 @@
           bonos: imported.bonos,
           citas: imported.citas
         };
+        normalizeStateData(importedState);
         const encrypted = await encryptObj(cryptoKey, importedState);
         payload = { salt, iv: encrypted.iv, ciphertext: encrypted.ciphertext, updatedAt: Date.now() };
       }
@@ -244,6 +245,7 @@
   function persist(){
     saveChain = saveChain.then(async () => {
       try {
+        normalizeStateData(state);
         const enc = await encryptObj(cryptoKey, state);
         await gistSet(ghToken, gistId, { salt, iv: enc.iv, ciphertext: enc.ciphertext, updatedAt: Date.now() });
       } catch(e){
@@ -360,7 +362,7 @@
       try {
         const key = await deriveKey(pw, data.salt);
         const decoded = await decryptObj(key, data.iv, data.ciphertext);
-        salt = data.salt; cryptoKey = key; state = decoded;
+        salt = data.salt; cryptoKey = key; state = normalizeStateData(decoded);
         state.pacientes=state.pacientes||[]; state.terapias=state.terapias||[]; state.bonos=state.bonos||[]; state.citas=state.citas||[];
         renderApp();
       } catch(e){ err.textContent = 'Contraseña incorrecta.'; }
@@ -372,7 +374,7 @@
   function lock(){ cryptoKey=null; state={pacientes:[],terapias:[],bonos:[],citas:[]}; boot(); }
 
   /* ================= App principal ================= */
-  const TABS = [['agenda','📅 Agenda'],['pacientes','🧑‍🤝‍🧑 Pacientes'],['terapias','💆 Terapias'],['bonos','🎟️ Bonos'],['contabilidad','💰 Contabilidad']];
+  const TABS = [['agenda','📅 Agenda'],['pacientes','🧑‍🤝‍🧑 Pacientes'],['terapias','💆 Terapias'],['bonos','🎟️ Bonos'],['recordatorios','📲 Recordatorios'],['contabilidad','💰 Contabilidad']];
 
   function renderApp(){
     const app = document.getElementById('app');
@@ -381,7 +383,7 @@
       '<div><button class="icon-btn" id="settingsBtn" title="Configuración">⚙️</button><button class="icon-btn" id="infoBtn" title="ID del Gist">ℹ️</button><button class="icon-btn" id="exportBtn" title="Descargar JSON">💾</button><button class="icon-btn" id="importBtn" title="Importar JSON cifrado">📥</button><button class="icon-btn" id="lockBtn" title="Bloquear">🔒</button><input type="file" id="importFile" accept="application/json,.json" hidden></div></div>'+
       '<nav class="tabs">'+TABS.map(t=>'<button data-tab="'+t[0]+'" class="'+(currentTab===t[0]?'active':'')+'">'+t[1]+'</button>').join('')+'</nav>'+
       '</header><main id="content"></main>'+
-      (currentTab!=='contabilidad' && currentTab!=='bonos' ? '<button class="fab" id="fabBtn">+</button>' : '');
+      (currentTab!=='contabilidad' && currentTab!=='bonos' && currentTab!=='recordatorios' ? '<button class="fab" id="fabBtn">+</button>' : '');
     document.getElementById('lockBtn').onclick = lock;
     document.getElementById('settingsBtn').onclick = openSettingsModal;
     document.getElementById('infoBtn').onclick = () => alert('ID de este Gist (para conectar otro dispositivo):\n\n'+gistId);
@@ -406,6 +408,7 @@
     else if (currentTab==='terapias') renderTerapias();
     else if (currentTab==='bonos') renderBonos();
     else if (currentTab==='contabilidad') renderContabilidad();
+    else if (currentTab==='recordatorios') renderRecordatorios();
   }
 
   function paciente(id){ return state.pacientes.find(p=>p.id===id); }
@@ -456,7 +459,7 @@
     });
     html += '</div>';
     html += '<div class="section-label">'+fechaCorta(agendaSelectedDate)+(agendaSelectedDate===today?' · Hoy':'')+'</div>';
-    const citasDia = state.citas.filter(ci=>ci.fecha===agendaSelectedDate).sort((a,b)=>a.hora.localeCompare(b.hora));
+    const citasDia = state.citas.filter(ci=>ci.fecha===agendaSelectedDate && ci.estado!=='anulada').sort((a,b)=>a.hora.localeCompare(b.hora));
     if (citasDia.length===0) html += '<div class="empty">No hay citas este día.<br><br><button class="btn ghost" id="emptyNewCita">+ Nueva cita</button></div>';
     else citasDia.forEach(ci => { html += citaCardHtml(ci, paciente(ci.pacienteId), terapia(ci.terapiaId)); });
     box.innerHTML = html;
@@ -469,9 +472,9 @@
   }
 
   function renderAgendaLista(box){
-    let citas = state.citas.slice().sort((a,b)=>(a.fecha+a.hora).localeCompare(b.fecha+b.hora));
+    let citas = state.citas.filter(ci => ci.estado!=='anulada').slice().sort((a,b)=>(a.fecha+a.hora).localeCompare(b.fecha+b.hora));
     const today = todayISO();
-    if (!agendaShowPast) citas = citas.filter(ci => ci.fecha >= today && ci.estado !== 'anulada');
+    if (!agendaShowPast) citas = citas.filter(ci => ci.fecha >= today);
     if (agendaFilterEstado) citas = citas.filter(ci => ci.estado === agendaFilterEstado);
     if (agendaSearch.trim()) { const q=agendaSearch.trim().toLowerCase(); citas = citas.filter(ci=>{ const p=paciente(ci.pacienteId); return p && (p.nombre.toLowerCase().includes(q) || (p.numero||'').toLowerCase().includes(q)); }); }
 
@@ -566,6 +569,20 @@
   }
 
   function pacienteLabel(p){ return p.nombre + (p.numero ? ' ('+p.numero+')' : ''); }
+  function normalizeName(value){ return String(value||'').trim().toLocaleUpperCase('es-ES'); }
+  function normalizeContactPhone(value){
+    const phone = String(value||'').trim();
+    if (!phone || phone === '+34') return '';
+    return phone.startsWith('+') ? phone : '+34 '+phone;
+  }
+  function normalizeStateData(data){
+    data.pacientes = (data.pacientes||[]).map(p => Object.assign({}, p, {
+      nombre: normalizeName(p.nombre),
+      telefono: normalizeContactPhone(p.telefono)
+    }));
+    data.terapias = (data.terapias||[]).map(t => Object.assign({}, t, { nombre: normalizeName(t.nombre) }));
+    return data;
+  }
 
   function renderAutocomplete(containerId, hiddenId, items, labelFn, subFn, onSelect, placeholder){
     const box = document.getElementById(containerId);
@@ -689,14 +706,15 @@
     const html = modalFieldsHtml([
       { type:'text', id:'nombre', label:'Nombre completo', value: existing?existing.nombre:'' },
       { type:'text', id:'numero', label:'Nº de paciente (opcional)', value: existing?existing.numero:'' },
-      { type:'tel', id:'telefono', label:'Teléfono de contacto', value: existing?existing.telefono:'' }
+      { type:'tel', id:'telefono', label:'Teléfono de contacto', value: existing?existing.telefono:'+34 ' }
     ]) + '<div class="field checkrow"><input type="checkbox" id="mf_whatsapp" '+(existing&&existing.whatsapp?'checked':'')+'><label for="mf_whatsapp" style="margin:0">Permite avisos por WhatsApp</label></div>'
       + confirmCancelHtml(existing?'Guardar':'Añadir paciente');
     openModal(existing?'Editar paciente':'Nuevo paciente', html, () => {
-      const nombre = document.getElementById('mf_nombre').value.trim();
+      const nombre = normalizeName(document.getElementById('mf_nombre').value);
+      const telefono = normalizeContactPhone(document.getElementById('mf_telefono').value);
       if (!nombre) { showToast('El nombre es obligatorio'); return; }
-      if (existing) { existing.nombre=nombre; existing.numero=document.getElementById('mf_numero').value.trim(); existing.telefono=document.getElementById('mf_telefono').value.trim(); existing.whatsapp=document.getElementById('mf_whatsapp').checked; }
-      else state.pacientes.push({ id: uid(), nombre, numero: document.getElementById('mf_numero').value.trim(), telefono: document.getElementById('mf_telefono').value.trim(), whatsapp: document.getElementById('mf_whatsapp').checked });
+      if (existing) { existing.nombre=nombre; existing.numero=document.getElementById('mf_numero').value.trim(); existing.telefono=telefono; existing.whatsapp=document.getElementById('mf_whatsapp').checked; }
+      else state.pacientes.push({ id: uid(), nombre, numero: document.getElementById('mf_numero').value.trim(), telefono, whatsapp: document.getElementById('mf_whatsapp').checked });
       save(); closeModal();
     });
   }
@@ -739,7 +757,7 @@
     ]) + '<div class="field checkrow"><input type="checkbox" id="mf_esBono" '+(existing&&existing.esBono?'checked':'')+'><label for="mf_esBono" style="margin:0">Es un bono de varias sesiones</label></div>'
       + '<div id="terapiaDynamic"></div>' + confirmCancelHtml(existing?'Guardar':'Añadir terapia');
     openModal(existing?'Editar terapia':'Nueva terapia', html, () => {
-      const nombre = document.getElementById('mf_nombre').value.trim();
+      const nombre = normalizeName(document.getElementById('mf_nombre').value);
       const duracion = parseInt(document.getElementById('mf_duracion').value,10)||30;
       const esBono = document.getElementById('mf_esBono').checked;
       const precio = parseFloat(document.getElementById('mf_precio').value)||0;
@@ -758,6 +776,66 @@
     };
     document.getElementById('mf_esBono').onchange = updateDynamic;
     updateDynamic();
+  }
+
+  /* ================= RECORDATORIOS WHATSAPP ================= */
+  function normalizePhone(tel){
+    let d = (tel||'').replace(/[^0-9]/g, '');
+    if (!d) return '';
+    if (d.length === 9) d = '34' + d; // móvil español sin prefijo de país
+    else if (d.startsWith('0034')) d = d.slice(2);
+    return d;
+  }
+  function mensajeRecordatorio(ci, p, t){
+    const dias = ['DOMINGO','LUNES','MARTES','MIÉRCOLES','JUEVES','VIERNES','SÁBADO'];
+    const fecha = isoToDate(ci.fecha);
+    const fechaTexto = String(fecha.getDate()).padStart(2,'0')+'/'+String(fecha.getMonth()+1).padStart(2,'0')+'/'+fecha.getFullYear();
+    const nombre = String(p.nombre||'').trim().split(/\s+/)[0].toLocaleUpperCase('es-ES');
+    return 'Hola, '+nombre+':\n\n'+
+      'Te recordamos tu cita con la Dra. Otilia Quireza:\n'+
+      dias[fecha.getDay()]+' '+fechaTexto+' - '+ci.hora+' horas\n\n'+
+      'Si no puedes asistir o necesitas cambiar la cita, por favor avísanos a este número de teléfono.\n'+
+      'Un saludo';
+  }
+  function renderRecordatorios(){
+    const c = document.getElementById('content');
+    const manana = addDays(todayISO(), 1);
+    const todasManana = state.citas.filter(ci => ci.fecha===manana && ci.estado!=='anulada').sort((a,b)=>a.hora.localeCompare(b.hora));
+    const conAviso = todasManana.filter(ci => { const p = paciente(ci.pacienteId); return p && p.whatsapp && p.telefono; });
+    const sinTelefonoOAviso = todasManana.length - conAviso.length;
+
+    let html = '<div class="section-label">Citas de mañana · '+fechaCorta(manana)+'</div>';
+    if (todasManana.length===0) { c.innerHTML = html + '<div class="empty">No hay citas agendadas para mañana.</div>'; return; }
+    if (conAviso.length===0) { html += '<div class="empty">Ninguno de los pacientes de mañana tiene el aviso por WhatsApp activado (o no tiene teléfono guardado).</div>'; c.innerHTML = html; return; }
+
+    html += conAviso.map(ci => {
+      const p = paciente(ci.pacienteId), t = terapia(ci.terapiaId);
+      const enviado = !!ci.recordatorioEnviado;
+      return '<div class="card" data-recordatorio="'+ci.id+'" style="'+(enviado?'opacity:.55':'')+'">'+
+        '<div class="row1"><div class="when" style="text-align:left"><b>'+esc(ci.hora)+'</b>'+fechaCorta(ci.fecha)+'</div>'+
+        '<div class="titlebox" style="text-align:right"><div class="t1">'+esc(pacienteLabel(p))+'</div><div class="t2">'+esc(t?t.nombre:'—')+' · '+esc(p.telefono)+'</div></div></div>'+
+        '<div class="actions">'+
+        '<button class="btn small" data-act="enviar">📲 Enviar WhatsApp</button>'+
+        '<label class="checkrow" style="margin-left:4px"><input type="checkbox" data-act="marcar" '+(enviado?'checked':'')+'> Enviado</label>'+
+        '</div></div>';
+    }).join('');
+
+    if (sinTelefonoOAviso > 0) html += '<div class="hint" style="margin-top:6px">'+sinTelefonoOAviso+' cita(s) más de mañana no aparecen aquí porque el paciente no tiene el aviso por WhatsApp activado o no tiene teléfono guardado.</div>';
+
+    c.innerHTML = html;
+    c.querySelectorAll('[data-recordatorio]').forEach(card => {
+      const id = card.dataset.recordatorio; const ci = state.citas.find(x=>x.id===id); if (!ci) return;
+      const p = paciente(ci.pacienteId), t = terapia(ci.terapiaId);
+      const btn = card.querySelector('[data-act="enviar"]');
+      if (btn) btn.onclick = () => {
+        const numero = normalizePhone(p.telefono);
+        if (!numero) { showToast('Teléfono no válido para WhatsApp'); return; }
+        const url = 'https://wa.me/'+numero+'?text='+encodeURIComponent(mensajeRecordatorio(ci,p,t));
+        window.open(url, '_blank');
+      };
+      const chk = card.querySelector('[data-act="marcar"]');
+      if (chk) chk.onchange = () => { ci.recordatorioEnviado = chk.checked; save(); };
+    });
   }
 
   /* ================= CONTABILIDAD ================= */
