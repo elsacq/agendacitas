@@ -494,7 +494,13 @@
     }
     box.innerHTML = html;
     document.getElementById('fEstado').onchange = e => { agendaFilterEstado=e.target.value; render(); };
-    document.getElementById('fBuscar').oninput = e => { agendaSearch=e.target.value; render(); };
+    document.getElementById('fBuscar').oninput = e => {
+      agendaSearch=e.target.value;
+      render();
+      const search = document.getElementById('fBuscar');
+      search.focus();
+      search.setSelectionRange(search.value.length, search.value.length);
+    };
     document.getElementById('fPast').onclick = () => { agendaShowPast=!agendaShowPast; render(); };
     const en = document.getElementById('emptyNewCita'); if (en) en.onclick = () => openCitaModal();
     wireCitaCardActions();
