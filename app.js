@@ -62,6 +62,116 @@
   function loadConfig(){ try { return JSON.parse(localStorage.getItem(LS_KEY) || 'null'); } catch(e){ return null; } }
   function saveConfig(cfg){ localStorage.setItem(LS_KEY, JSON.stringify(cfg)); }
   function clearConfig(){ localStorage.removeItem(LS_KEY); }
+
+  /* ================= Google Calendar ================= */
+  function loadGoogleConfig(){
+    const cfg = loadConfig();
+    googleClientId = (cfg && cfg.googleClientId) || null;
+    initGoogleWhenReady();
+  }
+  function initGoogleWhenReady(retries){
+    if (!googleClientId) return;
+    if (window.google && google.accounts && google.accounts.oauth2) { initGoogleClient(); return; }
+    if ((retries||0) < 20) setTimeout(()=>initGoogleWhenReady((retries||0)+1), 250);
+  }
+  function initGoogleClient(){
+    googleTokenClient = google.accounts.oauth2.initTokenClient({
+      client_id: googleClientId,
+      scope: 'https://www.googleapis.com/auth/calendar.events',
+      callback: (resp) => {
+        if (resp && resp.access_token) { googleAccessToken = resp.access_token; googleConnected = true; showToast('Conectado con Google Calendar'); render(); }
+      }
+    });
+  }
+  function connectGoogle(){
+    if (!googleClientId) { showToast('Configura primero el ID de cliente de Google en Configuración'); return; }
+    if (!googleTokenClient) { showToast('Cargando Google… inténtalo de nuevo en un momento'); initGoogleWhenReady(); return; }
+    googleTokenClient.requestAccessToken({ prompt: googleAccessToken ? '' : 'consent' });
+  }
+  function disconnectGoogle(){ googleAccessToken=null; googleConnected=false; render(); }
+
+  function addMinutesISO(fecha, hora, mins){
+    const [h,m] = hora.split(':').map(Number);
+    const d = isoToDate(fecha); d.setHours(h, m+(mins||30), 0, 0);
+    const hh=String(d.getHours()).padStart(2,'0'), mm=String(d.getMinutes()).padStart(2,'0');
+    return dateToISO(d)+'T'+hh+':'+mm+':00';
+  }
+  function citaToEventBody(ci){
+    const p = paciente(ci.pacienteId), t = terapia(ci.terapiaId);
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    return {
+      summary: (p?p.nombre:'Paciente') + ' · ' + (t?t.nombre:'Consulta'),
+      description: ci.notas || '',
+      start: { dateTime: ci.fecha+'T'+ci.hora+':00', timeZone: tz },
+      end: { dateTime: addMinutesISO(ci.fecha, ci.hora, ci.duracion||30), timeZone: tz }
+    };
+  }
+  async function gcalCreateEvent(ci){
+    if (!googleAccessToken) return;
+    try {
+      const res = await fetch('https://www.googleapis.com/calendar/v3/calendars/primary/events', {
+        method:'POST', headers:{ 'Authorization':'Bearer '+googleAccessToken, 'Content-Type':'application/json' },
+        body: JSON.stringify(citaToEventBody(ci))
+      });
+      if (res.ok) { const data = await res.json(); ci.googleEventId = data.id; }
+      else if (res.status===401) { googleAccessToken=null; googleConnected=false; showToast('La sesión de Google ha caducado, vuelve a conectar'); }
+    } catch(e){ console.error('gcal create', e); }
+  }
+  async function gcalUpdateEvent(ci){
+    if (!googleAccessToken || !ci.googleEventId) return;
+    try {
+      const res = await fetch('https://www.googleapis.com/calendar/v3/calendars/primary/events/'+ci.googleEventId, {
+        method:'PATCH', headers:{ 'Authorization':'Bearer '+googleAccessToken, 'Content-Type':'application/json' },
+        body: JSON.stringify(citaToEventBody(ci))
+      });
+      if (res.status===401) { googleAccessToken=null; googleConnected=false; }
+      else if (res.status===404) { ci.googleEventId=null; await gcalCreateEvent(ci); }
+    } catch(e){ console.error('gcal update', e); }
+  }
+  async function gcalDeleteEvent(ci){
+    if (!googleAccessToken || !ci.googleEventId) return;
+    try {
+      await fetch('https://www.googleapis.com/calendar/v3/calendars/primary/events/'+ci.googleEventId, { method:'DELETE', headers:{ 'Authorization':'Bearer '+googleAccessToken } });
+    } catch(e){ console.error('gcal delete', e); }
+    ci.googleEventId = null;
+  }
+  async function syncCita(ci){
+    if (!googleAccessToken) return;
+    if (ci.googleEventId) await gcalUpdateEvent(ci); else await gcalCreateEvent(ci);
+    persist();
+  }
+  async function syncPendientes(){
+    if (!googleAccessToken) { showToast('Conecta primero con Google Calendar'); return; }
+    const pendientes = state.citas.filter(ci => ci.estado!=='anulada' && !ci.googleEventId && ci.fecha>=todayISO());
+    if (pendientes.length===0) { showToast('No hay citas pendientes de sincronizar'); return; }
+    showToast('Sincronizando '+pendientes.length+' citas…');
+    for (const ci of pendientes) { await gcalCreateEvent(ci); }
+    persist(); render();
+    showToast('Sincronización completada');
+  }
+
+  function openSettingsModal(){
+    const cfg = loadConfig() || {};
+    const body =
+      '<div class="field"><label>ID de cliente OAuth de Google (Calendar)</label><input type="text" id="mf_gcid" value="'+esc(cfg.googleClientId||'')+'" placeholder="xxxxx.apps.googleusercontent.com"></div>'+
+      '<div class="hint">Créalo en Google Cloud Console (APIs y servicios → Credenciales → Crear credenciales → ID de cliente de OAuth 2.0, tipo "Aplicación web"), habilita antes la "Google Calendar API" y añade la URL de esta página en "Orígenes autorizados de JavaScript".</div>'+
+      '<div style="margin-top:14px">'+
+      (googleConnected
+        ? '<div class="note-box">✅ Conectado con Google Calendar</div><button class="btn secondary block" id="gDisconnect" style="width:100%;margin-bottom:8px">Desconectar</button><button class="btn secondary block" id="gSyncAll" style="width:100%">Sincronizar citas pendientes</button>'
+        : '<button class="btn secondary block" id="gConnect" style="width:100%">Conectar con Google Calendar</button>')+
+      '</div>';
+    openModal('Configuración', body + confirmCancelHtml('Guardar'), () => {
+      const gcid = document.getElementById('mf_gcid').value.trim();
+      const cfgNow = loadConfig() || {};
+      cfgNow.googleClientId = gcid; saveConfig(cfgNow);
+      googleClientId = gcid; googleTokenClient = null; initGoogleWhenReady();
+      closeModal(); showToast('Configuración guardada');
+    });
+    const gc = document.getElementById('gConnect'); if (gc) gc.onclick = () => connectGoogle();
+    const gd = document.getElementById('gDisconnect'); if (gd) gd.onclick = () => { disconnectGoogle(); closeModal(); };
+    const gs = document.getElementById('gSyncAll'); if (gs) gs.onclick = () => { closeModal(); syncPendientes(); };
+  }
+
   function exportJson(){
     const blob = new Blob([JSON.stringify(state, null, 2)], { type:'application/json;charset=utf-8' });
     const url = URL.createObjectURL(blob);
@@ -114,6 +224,7 @@
 
   /* ================= Estado de la app ================= */
   let ghToken = null, gistId = null, cryptoKey = null, salt = null;
+  let googleClientId = null, googleAccessToken = null, googleTokenClient = null, googleConnected = false;
   let state = { pacientes: [], terapias: [], bonos: [], citas: [] };
   let saveChain = Promise.resolve();
   let currentTab = 'agenda';
@@ -190,7 +301,8 @@
           await gistGet(token, gid); // valida acceso, aunque el resultado se relee en boot()
         }
         ghToken = token; gistId = gid;
-        saveConfig({ token, gistId: gid });
+        const prevCfg = loadConfig() || {};
+        saveConfig(Object.assign({}, prevCfg, { token, gistId: gid }));
         boot();
       } catch(e){
         err.textContent = e.code==='auth' ? 'Token inválido o sin permiso "gist".' : (e.code==='not_found' ? 'No se encontró ese Gist. Revisa el ID.' : 'No se pudo conectar. Inténtalo de nuevo.');
@@ -233,7 +345,7 @@
     const app = document.getElementById('app');
     app.innerHTML =
       '<div class="auth-wrap"><div class="auth-card">'+
-      '<div class="icon">🔒</div><h1>Centro de Medicina Integral<br/>Dra. Otilia Quireza</h1>'+
+      '<div class="icon">🔒</div><h1>Clínica de Medicina Integral<br/>Dra. Otilia Quireza</h1>'+
       '<p>Introduce la contraseña para descifrar los datos.</p>'+
       '<input type="password" id="pwLogin" placeholder="Contraseña" autocomplete="current-password">'+
       '<div class="err" id="loginErr"></div>'+
@@ -265,16 +377,18 @@
   function renderApp(){
     const app = document.getElementById('app');
     app.innerHTML =
-      '<header class="topbar"><div class="topbar-inner"><h1>Centro de Medicina Integral<br/>Dra. Otilia Quireza</h1>'+
-      '<div><button class="icon-btn" id="infoBtn" title="ID del Gist">ℹ️</button><button class="icon-btn" id="exportBtn" title="Descargar JSON">💾</button><button class="icon-btn" id="importBtn" title="Importar JSON cifrado">📥</button><button class="icon-btn" id="lockBtn" title="Bloquear">🔒</button><input type="file" id="importFile" accept="application/json,.json" hidden></div></div>'+
+      '<header class="topbar"><div class="topbar-inner"><h1>Clínica de Medicina Integral<br/>Dra. Otilia Quireza</h1>'+
+      '<div><button class="icon-btn" id="settingsBtn" title="Configuración">⚙️</button><button class="icon-btn" id="infoBtn" title="ID del Gist">ℹ️</button><button class="icon-btn" id="exportBtn" title="Descargar JSON">💾</button><button class="icon-btn" id="importBtn" title="Importar JSON cifrado">📥</button><button class="icon-btn" id="lockBtn" title="Bloquear">🔒</button><input type="file" id="importFile" accept="application/json,.json" hidden></div></div>'+
       '<nav class="tabs">'+TABS.map(t=>'<button data-tab="'+t[0]+'" class="'+(currentTab===t[0]?'active':'')+'">'+t[1]+'</button>').join('')+'</nav>'+
       '</header><main id="content"></main>'+
       (currentTab!=='contabilidad' && currentTab!=='bonos' ? '<button class="fab" id="fabBtn">+</button>' : '');
     document.getElementById('lockBtn').onclick = lock;
+    document.getElementById('settingsBtn').onclick = openSettingsModal;
     document.getElementById('infoBtn').onclick = () => alert('ID de este Gist (para conectar otro dispositivo):\n\n'+gistId);
     document.getElementById('exportBtn').onclick = exportJson;
     document.getElementById('importBtn').onclick = () => document.getElementById('importFile').click();
     document.getElementById('importFile').onchange = importEncryptedJson;
+    loadGoogleConfig();
     document.querySelectorAll('nav.tabs button').forEach(b => b.onclick = () => { currentTab=b.dataset.tab; renderApp(); });
     const fab = document.getElementById('fabBtn');
     if (fab) fab.onclick = () => {
@@ -391,7 +505,8 @@
       '<div class="titlebox" style="text-align:right"><div class="t1">'+esc(p?pacienteLabel(p):'Paciente eliminado')+'</div><div class="t2">'+esc(t?t.nombre:'—')+'</div></div></div>'+
       '<div class="badges"><span class="badge estado-'+ci.estado+'">'+labelEstado(ci.estado)+'</span>'+
       '<span class="badge pago-'+ci.pagoEstado+'">'+pagoLabel+(ci.formaPago?' · '+labelForma(ci.formaPago):'')+'</span>'+
-      (ci.pagoEstado!=='bono' ? '<span class="badge" style="background:var(--surface-2);color:var(--text-dim)">'+euros(ci.precio)+'</span>' : '')+'</div>'+
+      (ci.pagoEstado!=='bono' ? '<span class="badge" style="background:var(--surface-2);color:var(--text-dim)">'+euros(ci.precio)+'</span>' : '')+
+      (ci.googleEventId ? '<span class="badge" style="background:var(--surface-2);color:var(--text-dim)">📅 Google</span>' : '')+'</div>'+
       (ci.notas ? '<div class="hint" style="margin-top:8px">'+esc(ci.notas)+'</div>' : '')+
       '<div class="actions">'+
       (ci.estado!=='anulada' && ci.estado!=='finalizada' ? '<button class="btn small secondary" data-act="estado" data-next="'+nextEstado(ci.estado)+'">→ '+labelEstado(nextEstado(ci.estado))+'</button>' : '')+
@@ -430,6 +545,7 @@
       }
     }
     save();
+    if (ci.googleEventId) gcalDeleteEvent(ci).then(()=>{ persist(); render(); });
   }
 
   function openPagoModal(ci){
@@ -445,6 +561,7 @@
       ci.fecha=document.getElementById('mf_fecha').value; ci.hora=document.getElementById('mf_hora').value;
       if (ci.estado==='anulada') ci.estado='pendiente';
       save(); closeModal();
+      syncCita(ci).then(render);
     });
   }
 
@@ -518,6 +635,7 @@
         nueva.precio=t.precio; nueva.pagoEstado='pendiente'; nueva.formaPago=null;
       }
       state.citas.push(nueva); save(); closeModal(); showToast('Cita agendada');
+      syncCita(nueva).then(render);
     });
     renderAutocomplete('pacienteAc', 'mf_paciente', pacientesOrdenados, pacienteLabel, p=>p.telefono, updateDynamic, 'Buscar por nombre, apellido o nº de paciente…');
     function updateDynamic(){
