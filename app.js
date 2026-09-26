@@ -857,7 +857,7 @@
     printWindow.document.close();
     if (sendWhatsapp) {
       const number = normalizePhone(patient&&patient.telefono);
-      if (number) window.open('https://wa.me/'+number+'?text='+encodeURIComponent('Te envío el informe de la prueba EAVoll. Adjunta el PDF que acabas de generar.'), '_blank');
+      if (number) openWhatsAppBusiness(number, 'Te envío el informe de la prueba EAVoll. Adjunta el PDF que acabas de generar.');
     }
   }
   function renderEavoll(){
@@ -926,14 +926,28 @@
   }
   function mensajeRecordatorio(ci, p, t){
     const dias = ['DOMINGO','LUNES','MARTES','MIÉRCOLES','JUEVES','VIERNES','SÁBADO'];
+    const meses = ['ENERO','FEBRERO','MARZO','ABRIL','MAYO','JUNIO','JULIO','AGOSTO','SEPTIEMBRE','OCTUBRE','NOVIEMBRE','DICIEMBRE'];
     const fecha = isoToDate(ci.fecha);
-    const fechaTexto = String(fecha.getDate()).padStart(2,'0')+'/'+String(fecha.getMonth()+1).padStart(2,'0')+'/'+fecha.getFullYear();
+    const fechaTexto = dias[fecha.getDay()]+' '+fecha.getDate()+' de '+meses[fecha.getMonth()]+' del '+fecha.getFullYear()+' a las '+ci.hora+' horas';
     const nombre = String(p.nombre||'').trim().split(/\s+/)[0].toLocaleUpperCase('es-ES');
     return 'Hola, '+nombre+':\n\n'+
       'Te recordamos tu cita con la Dra. Otilia Quireza:\n'+
-      dias[fecha.getDay()]+' '+fechaTexto+' - '+ci.hora+' horas\n\n'+
-      'Si no puedes asistir o necesitas cambiar la cita, por favor avísanos a este número de teléfono.\n'+
+      '*'+fechaTexto+'*\n\n'+
+      'Si no puedes asistir o necesitas cambiar la cita, por favor avísanos a este número de teléfono (622 15 15 30).\n'+
       'Un saludo';
+  }
+  function openWhatsAppBusiness(number, message){
+    const query = 'phone='+encodeURIComponent(number)+'&text='+encodeURIComponent(message);
+    const userAgent = navigator.userAgent||'';
+    if (/Android/i.test(userAgent)) {
+      window.location.href = 'intent://send?'+query+'#Intent;scheme=whatsapp;package=com.whatsapp.w4b;end';
+      return;
+    }
+    if (/iPhone|iPad|iPod/i.test(userAgent) || (navigator.platform==='MacIntel' && navigator.maxTouchPoints>1)) {
+      window.location.href = 'whatsapp-business://send?'+query;
+      return;
+    }
+    showToast('Para abrir solo WhatsApp Business, usa un dispositivo con la aplicación Business instalada');
   }
   function renderRecordatorios(){
     const c = document.getElementById('content');
@@ -973,8 +987,7 @@
       if (btn) btn.onclick = () => {
         const numero = normalizePhone(p.telefono);
         if (!numero) { showToast('Teléfono no válido para WhatsApp'); return; }
-        const url = 'https://wa.me/'+numero+'?text='+encodeURIComponent(mensajeRecordatorio(ci,p,t));
-        window.open(url, '_blank');
+        openWhatsAppBusiness(numero, mensajeRecordatorio(ci,p,t));
       };
       const chk = card.querySelector('[data-act="marcar"]');
       if (chk) chk.onchange = () => { ci.recordatorioEnviado = chk.checked; save(); };
