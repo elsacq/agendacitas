@@ -850,7 +850,7 @@
       return '<tr><td>'+esc(zone)+'</td><td class="'+eavollColorClass(value)+'">'+value+'</td></tr>';
     }).join('')+'</table></section>';
     const rows = '<div class="report-row">'+reportGroup(EAVOLL_GROUPS[0])+reportGroup(EAVOLL_GROUPS[1])+'</div><div class="report-row">'+reportGroup(EAVOLL_GROUPS[2])+reportGroup(EAVOLL_GROUPS[3])+'</div>';
-    const report = '<!doctype html><html lang="es"><head><meta charset="UTF-8"><title>'+esc(pdfName)+'</title><style>@page{size:A4;margin:8mm}*{box-sizing:border-box}body{font-family:Arial,sans-serif;color:#111;margin:0}h1{font-size:20px;margin:0 0 2px}h2{font-size:13px;margin:0 0 3px}p{font-size:11px;margin:2px 0 6px;color:#444}.report-row{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);width:96%;gap:5px;margin-bottom:5px}.report-section{min-width:0}table{border-collapse:collapse;width:100%;table-layout:fixed}td{border:1px solid #999;padding:2px 4px;font-size:10px;line-height:1.05}td:first-child{width:auto}td:last-child{width:32px;text-align:center;font-weight:bold}.eavoll-green{background:#b7e4c7}.eavoll-yellow{background:#ffe69a}.eavoll-white{background:#fff}.eavoll-orange{background:#f6b26b}.eavoll-fuchsia{background:#d94df5;color:#fff}.legend{margin-top:5px;display:flex;flex-wrap:wrap;gap:3px 7px;font-size:9px}.legend span{display:inline-flex;align-items:center;gap:3px}.legend i{display:inline-block;width:11px;height:11px;border:1px solid #777}</style></head><body><h1>Prueba EAVoll</h1><p><b>Paciente:</b> '+esc(patient?patient.nombre:'Paciente eliminado')+'<br><b>Fecha:</b> '+esc(record.fecha)+'</p>'+rows+'<div class="legend"><span><i class="eavoll-green"></i>Degeneración [0 - 30]</span><span><i class="eavoll-yellow"></i>Deficiencia [30 - 40]</span><span><i class="eavoll-white"></i>Normal [40 - 60]</span><span><i class="eavoll-orange"></i>Irritación [60 - 80]</span><span><i class="eavoll-fuchsia"></i>Inflamación [80 - 100]</span></div><script>window.onload=function(){window.print()}<\/script></body></html>';
+    const report = '<!doctype html><html lang="es"><head><meta charset="UTF-8"><title>'+esc(pdfName)+'</title><style>@page{size:A4;margin:8mm}*{box-sizing:border-box}body{font-family:Arial,sans-serif;color:#111;margin:0;-webkit-print-color-adjust:exact;print-color-adjust:exact}h1{font-size:20px;margin:0 0 2px}h2{font-size:13px;margin:0 0 3px}p{font-size:11px;margin:2px 0 6px;color:#444}.report-row{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);width:96%;gap:5px;margin-bottom:5px}.report-section{min-width:0}table{border-collapse:collapse;width:100%;table-layout:fixed}td{border:1px solid #999;padding:2px 4px;font-size:10px;line-height:1.05}td:first-child{width:auto}td:last-child{width:32px;text-align:center;font-weight:bold}.eavoll-green{background:#b7e4c7!important;-webkit-print-color-adjust:exact;print-color-adjust:exact}.eavoll-yellow{background:#ffe69a!important;-webkit-print-color-adjust:exact;print-color-adjust:exact}.eavoll-white{background:#fff!important;-webkit-print-color-adjust:exact;print-color-adjust:exact}.eavoll-orange{background:#f6b26b!important;-webkit-print-color-adjust:exact;print-color-adjust:exact}.eavoll-fuchsia{background:#d94df5!important;color:#fff!important;-webkit-print-color-adjust:exact;print-color-adjust:exact}.legend{margin-top:5px;display:flex;flex-wrap:wrap;gap:3px 7px;font-size:9px}.legend span{display:inline-flex;align-items:center;gap:3px}.legend i{display:inline-block;width:11px;height:11px;border:1px solid #777}</style></head><body><h1>Prueba EAVoll</h1><p><b>Paciente:</b> '+esc(patient?patient.nombre:'Paciente eliminado')+'<br><b>Fecha:</b> '+esc(record.fecha)+'</p>'+rows+'<div class="legend"><span><i class="eavoll-green"></i>Degeneración [0 - 30]</span><span><i class="eavoll-yellow"></i>Deficiencia [30 - 40]</span><span><i class="eavoll-white"></i>Normal [40 - 60]</span><span><i class="eavoll-orange"></i>Irritación [60 - 80]</span><span><i class="eavoll-fuchsia"></i>Inflamación [80 - 100]</span></div><script>window.onload=function(){window.print()}<\/script></body></html>';
     const printWindow = window.open('', '_blank');
     if (!printWindow) { showToast('Permite las ventanas emergentes para generar el PDF'); return; }
     printWindow.document.write(report);
@@ -937,14 +937,19 @@
   }
   function renderRecordatorios(){
     const c = document.getElementById('content');
-    const manana = addDays(todayISO(), 1);
-    const todasManana = state.citas.filter(ci => ci.fecha===manana && ci.estado!=='anulada').sort((a,b)=>a.hora.localeCompare(b.hora));
-    const conAviso = todasManana.filter(ci => { const p = paciente(ci.pacienteId); return p && p.whatsapp && p.telefono; });
-    const sinTelefonoOAviso = todasManana.length - conAviso.length;
+    const hoy = todayISO();
+    const manana = addDays(hoy, 1);
+    const hoyDia = isoToDate(hoy).getDay();
+    const fechasRecordatorio = [manana];
+    if (hoyDia===5) fechasRecordatorio.push(addDays(hoy, 3));
+    else if (hoyDia===6) fechasRecordatorio.push(addDays(hoy, 2));
+    const citasRecordatorio = state.citas.filter(ci => fechasRecordatorio.includes(ci.fecha) && ci.estado!=='anulada').sort((a,b)=>(a.fecha+a.hora).localeCompare(b.fecha+b.hora));
+    const conAviso = citasRecordatorio.filter(ci => { const p = paciente(ci.pacienteId); return p && p.whatsapp && p.telefono; });
+    const sinTelefonoOAviso = citasRecordatorio.length - conAviso.length;
 
-    let html = '<div class="section-label">Citas de mañana · '+fechaCorta(manana)+'</div>';
-    if (todasManana.length===0) { c.innerHTML = html + '<div class="empty">No hay citas agendadas para mañana.</div>'; return; }
-    if (conAviso.length===0) { html += '<div class="empty">Ninguno de los pacientes de mañana tiene el aviso por WhatsApp activado (o no tiene teléfono guardado).</div>'; c.innerHTML = html; return; }
+    let html = '<div class="section-label">Citas para recordar · '+fechasRecordatorio.map(fechaCorta).join(' · ')+'</div>';
+    if (citasRecordatorio.length===0) { c.innerHTML = html + '<div class="empty">No hay citas para estos días.</div>'; return; }
+    if (conAviso.length===0) { html += '<div class="empty">Ninguno de los pacientes de estos días tiene el aviso por WhatsApp activado (o no tiene teléfono guardado).</div>'; c.innerHTML = html; return; }
 
     html += conAviso.map(ci => {
       const p = paciente(ci.pacienteId), t = terapia(ci.terapiaId);
@@ -958,7 +963,7 @@
         '</div></div>';
     }).join('');
 
-    if (sinTelefonoOAviso > 0) html += '<div class="hint" style="margin-top:6px">'+sinTelefonoOAviso+' cita(s) más de mañana no aparecen aquí porque el paciente no tiene el aviso por WhatsApp activado o no tiene teléfono guardado.</div>';
+    if (sinTelefonoOAviso > 0) html += '<div class="hint" style="margin-top:6px">'+sinTelefonoOAviso+' cita(s) no aparecen aquí porque el paciente no tiene el aviso por WhatsApp activado o no tiene teléfono guardado.</div>';
 
     c.innerHTML = html;
     c.querySelectorAll('[data-recordatorio]').forEach(card => {
