@@ -200,7 +200,8 @@
           pacientes: imported.pacientes,
           terapias: imported.terapias,
           bonos: imported.bonos,
-          citas: imported.citas
+          citas: imported.citas,
+          eavoll: imported.eavoll || []
         };
         normalizeStateData(importedState);
         const encrypted = await encryptObj(cryptoKey, importedState);
@@ -226,7 +227,7 @@
   /* ================= Estado de la app ================= */
   let ghToken = null, gistId = null, cryptoKey = null, salt = null;
   let googleClientId = null, googleAccessToken = null, googleTokenClient = null, googleConnected = false;
-  let state = { pacientes: [], terapias: [], bonos: [], citas: [] };
+  let state = { pacientes: [], terapias: [], bonos: [], citas: [], eavoll: [] };
   let saveChain = Promise.resolve();
   let currentTab = 'agenda';
   let agendaView = 'semana';
@@ -335,7 +336,7 @@
       try {
         salt = bytesToB64(randomBytes(16));
         cryptoKey = await deriveKey(pw1, salt);
-        state = { pacientes: [], terapias: [], bonos: [], citas: [] };
+        state = { pacientes: [], terapias: [], bonos: [], citas: [], eavoll: [] };
         const enc = await encryptObj(cryptoKey, state);
         await gistSet(ghToken, gistId, { salt, iv: enc.iv, ciphertext: enc.ciphertext, updatedAt: Date.now() });
         renderApp();
@@ -363,7 +364,7 @@
         const key = await deriveKey(pw, data.salt);
         const decoded = await decryptObj(key, data.iv, data.ciphertext);
         salt = data.salt; cryptoKey = key; state = normalizeStateData(decoded);
-        state.pacientes=state.pacientes||[]; state.terapias=state.terapias||[]; state.bonos=state.bonos||[]; state.citas=state.citas||[];
+        state.pacientes=state.pacientes||[]; state.terapias=state.terapias||[]; state.bonos=state.bonos||[]; state.citas=state.citas||[]; state.eavoll=state.eavoll||[];
         renderApp();
       } catch(e){ err.textContent = 'Contraseña incorrecta.'; }
     };
@@ -371,10 +372,10 @@
     document.getElementById('pwLogin').addEventListener('keydown', e => { if (e.key==='Enter') tryLogin(); });
   }
 
-  function lock(){ cryptoKey=null; state={pacientes:[],terapias:[],bonos:[],citas:[]}; boot(); }
+  function lock(){ cryptoKey=null; state={pacientes:[],terapias:[],bonos:[],citas:[],eavoll:[]}; boot(); }
 
   /* ================= App principal ================= */
-  const TABS = [['agenda','📅 Agenda'],['pacientes','🧑‍🤝‍🧑 Pacientes'],['terapias','💆 Terapias'],['bonos','🎟️ Bonos'],['recordatorios','📲 Recordatorios'],['contabilidad','💰 Contabilidad']];
+  const TABS = [['agenda','📅 Agenda'],['pacientes','🧑‍🤝‍🧑 Pacientes'],['terapias','💆 Terapias'],['bonos','🎟️ Bonos'],['eavoll','🖐️ EAVoll'],['recordatorios','📲 Recordatorios'],['contabilidad','💰 Contabilidad']];
 
   function renderApp(){
     const app = document.getElementById('app');
@@ -397,6 +398,7 @@
       if (currentTab==='agenda') openCitaModal(agendaView==='semana' ? agendaSelectedDate : todayISO());
       else if (currentTab==='pacientes') openPacienteModal();
       else if (currentTab==='terapias') openTerapiaModal();
+      else if (currentTab==='eavoll') openEavollModal();
     };
     render();
   }
@@ -407,6 +409,7 @@
     else if (currentTab==='pacientes') renderPacientes();
     else if (currentTab==='terapias') renderTerapias();
     else if (currentTab==='bonos') renderBonos();
+    else if (currentTab==='eavoll') renderEavoll();
     else if (currentTab==='contabilidad') renderContabilidad();
     else if (currentTab==='recordatorios') renderRecordatorios();
   }
@@ -782,6 +785,135 @@
     };
     document.getElementById('mf_esBono').onchange = updateDynamic;
     updateDynamic();
+  }
+
+  /* ================= EAVOLL ================= */
+  const EAVOLL_HAND_ZONES = ['Linfáticos','Pulmón','Intestino grueso','Sistema Nervioso','Circulación','Alergias','Degen. Parénquima','Endocrino','Corazón','Intestino delgado'];
+  const EAVOLL_FOOT_ZONES = ['Páncreas (D) Bazo (I)','Hígado','Degen. Articular','Estómago','Degen. Fibroide','Piel','Degen. Grasa','Vías biliares','Riñón','Genitourinario','Útero / Próstata'];
+  const EAVOLL_GROUPS = [
+    { label:'Mano derecha', prefix:'md', zones:EAVOLL_HAND_ZONES },
+    { label:'Mano izquierda', prefix:'mi', zones:EAVOLL_HAND_ZONES },
+    { label:'Pie derecho', prefix:'pd', zones:EAVOLL_FOOT_ZONES },
+    { label:'Pie izquierdo', prefix:'pi', zones:EAVOLL_FOOT_ZONES }
+  ];
+  function eavollColorClass(value){
+    const n = Number(value);
+    if (!Number.isInteger(n) || n<0 || n>100 || n%2!==0) return 'eavoll-invalid';
+    if (n<=28) return 'eavoll-green';
+    if (n<=38) return 'eavoll-yellow';
+    if (n<=58) return 'eavoll-white';
+    if (n<=78) return 'eavoll-orange';
+    return 'eavoll-fuchsia';
+  }
+  function eavollInputHtml(code, value){
+    return '<input class="eavoll-value '+eavollColorClass(value)+'" type="number" min="0" max="100" step="2" data-eavoll-value="'+code+'" value="'+(value==null?'':esc(value))+'">';
+  }
+  function eavollGroupHtml(group, values){
+    return '<section class="eavoll-group"><h3>'+group.label+'</h3><div class="eavoll-grid">'+group.zones.map((zone,index) => {
+      const code = group.prefix+(index+1);
+      return '<label class="eavoll-cell '+eavollColorClass(values[code])+'" data-eavoll-cell="'+code+'"><span>'+esc(zone)+'</span>'+eavollInputHtml(code, values[code])+'</label>';
+    }).join('')+'</div></section>';
+  }
+  function wireEavollInputs(container){
+    const inputs = Array.from(container.querySelectorAll('[data-eavoll-value]'));
+    inputs.forEach((input,index) => {
+      input.oninput = () => {
+        const cell = input.closest('[data-eavoll-cell]');
+        const color = eavollColorClass(input.value === '' ? null : Number(input.value));
+        input.className = 'eavoll-value '+color;
+        if (cell) cell.className = 'eavoll-cell '+color;
+      };
+      input.onblur = () => {
+        if (input.value === '') return;
+        const value = Number(input.value);
+        if (Number.isFinite(value)) input.value = Math.max(0, Math.min(100, Math.round(value/2)*2));
+        input.oninput();
+      };
+      input.onkeydown = event => {
+        if (event.key !== 'Enter') return;
+        event.preventDefault();
+        const next = inputs[index+1];
+        if (next) next.focus();
+        else document.getElementById('modalConfirm').focus();
+      };
+    });
+  }
+  function eavollLegendHtml(){
+    return '<div class="eavoll-legend"><div><i class="eavoll-green"></i>Degeneración [0 - 30]</div><div><i class="eavoll-yellow"></i>Deficiencia [30 - 40]</div><div><i class="eavoll-white"></i>Normal [40 - 60]</div><div><i class="eavoll-orange"></i>Irritación [60 - 80]</div><div><i class="eavoll-fuchsia"></i>Inflamación [80 - 100]</div></div>';
+  }
+  function eavollPrint(record, sendWhatsapp){
+    const patient = paciente(record.pacienteId);
+    const pdfName = 'EAVoll - '+(patient?patient.nombre:'Paciente eliminado')+' - '+record.fecha;
+    const reportGroup = group => '<section class="report-section"><h2>'+group.label+'</h2><table>'+group.zones.map((zone,index) => {
+      const code = group.prefix+(index+1);
+      const value = record.valores[code];
+      return '<tr><td>'+esc(zone)+'</td><td class="'+eavollColorClass(value)+'">'+value+'</td></tr>';
+    }).join('')+'</table></section>';
+    const rows = '<div class="report-row">'+reportGroup(EAVOLL_GROUPS[0])+reportGroup(EAVOLL_GROUPS[1])+'</div><div class="report-row">'+reportGroup(EAVOLL_GROUPS[2])+reportGroup(EAVOLL_GROUPS[3])+'</div>';
+    const report = '<!doctype html><html lang="es"><head><meta charset="UTF-8"><title>'+esc(pdfName)+'</title><style>@page{size:A4;margin:8mm}*{box-sizing:border-box}body{font-family:Arial,sans-serif;color:#111;margin:0}h1{font-size:20px;margin:0 0 2px}h2{font-size:13px;margin:0 0 3px}p{font-size:11px;margin:2px 0 6px;color:#444}.report-row{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);width:96%;gap:5px;margin-bottom:5px}.report-section{min-width:0}table{border-collapse:collapse;width:100%;table-layout:fixed}td{border:1px solid #999;padding:2px 4px;font-size:10px;line-height:1.05}td:first-child{width:auto}td:last-child{width:32px;text-align:center;font-weight:bold}.eavoll-green{background:#b7e4c7}.eavoll-yellow{background:#ffe69a}.eavoll-white{background:#fff}.eavoll-orange{background:#f6b26b}.eavoll-fuchsia{background:#d94df5;color:#fff}.legend{margin-top:5px;display:flex;flex-wrap:wrap;gap:3px 7px;font-size:9px}.legend span{display:inline-flex;align-items:center;gap:3px}.legend i{display:inline-block;width:11px;height:11px;border:1px solid #777}</style></head><body><h1>Prueba EAVoll</h1><p><b>Paciente:</b> '+esc(patient?patient.nombre:'Paciente eliminado')+'<br><b>Fecha:</b> '+esc(record.fecha)+'</p>'+rows+'<div class="legend"><span><i class="eavoll-green"></i>Degeneración [0 - 30]</span><span><i class="eavoll-yellow"></i>Deficiencia [30 - 40]</span><span><i class="eavoll-white"></i>Normal [40 - 60]</span><span><i class="eavoll-orange"></i>Irritación [60 - 80]</span><span><i class="eavoll-fuchsia"></i>Inflamación [80 - 100]</span></div><script>window.onload=function(){window.print()}<\/script></body></html>';
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) { showToast('Permite las ventanas emergentes para generar el PDF'); return; }
+    printWindow.document.write(report);
+    printWindow.document.close();
+    if (sendWhatsapp) {
+      const number = normalizePhone(patient&&patient.telefono);
+      if (number) window.open('https://wa.me/'+number+'?text='+encodeURIComponent('Te envío el informe de la prueba EAVoll. Adjunta el PDF que acabas de generar.'), '_blank');
+    }
+  }
+  function renderEavoll(){
+    const c = document.getElementById('content');
+    const records = state.eavoll.slice().sort((a,b)=>(b.fecha||'').localeCompare(a.fecha||''));
+    if (records.length===0) {
+      c.innerHTML = '<div class="empty">Todavía no hay pruebas EAVoll.<br><br><button class="btn ghost" id="emptyNewEavoll">+ Nueva prueba</button></div>';
+      document.getElementById('emptyNewEavoll').onclick=()=>openEavollModal();
+      return;
+    }
+    c.innerHTML = '<div class="toolbar"><button class="btn" id="newEavoll">+ Nueva prueba EAVoll</button></div>'+records.map(record => {
+      const p = paciente(record.pacienteId);
+      return '<div class="card eavoll-record"><div class="row1"><div class="titlebox"><div class="t1">'+esc(p?p.nombre:'Paciente eliminado')+'</div><div class="t2">Prueba del '+esc(fechaCorta(record.fecha))+'</div></div></div><div class="actions"><button class="btn small secondary" data-eavoll-pdf="'+record.id+'">PDF</button><button class="btn small secondary" data-eavoll-whatsapp="'+record.id+'">WhatsApp</button><button class="btn small secondary" data-eavoll-edit="'+record.id+'">Editar</button><button class="btn small danger" data-eavoll-delete="'+record.id+'">Eliminar</button></div></div>';
+    }).join('');
+    document.getElementById('newEavoll').onclick=()=>openEavollModal();
+    c.querySelectorAll('[data-eavoll-pdf]').forEach(button => button.onclick=()=>eavollPrint(state.eavoll.find(record=>record.id===button.dataset.eavollPdf), false));
+    c.querySelectorAll('[data-eavoll-whatsapp]').forEach(button => button.onclick=()=>eavollPrint(state.eavoll.find(record=>record.id===button.dataset.eavollWhatsapp), true));
+    c.querySelectorAll('[data-eavoll-edit]').forEach(button => button.onclick=()=>openEavollModal(state.eavoll.find(record=>record.id===button.dataset.eavollEdit)));
+    c.querySelectorAll('[data-eavoll-delete]').forEach(button => button.onclick=()=>{
+      if (!confirm('¿Eliminar esta prueba EAVoll?')) return;
+      state.eavoll=state.eavoll.filter(record=>record.id!==button.dataset.eavollDelete);
+      save();
+    });
+  }
+  function openEavollModal(existing){
+    if (state.pacientes.length===0) { showToast('Añade primero un paciente'); return; }
+    const values = existing ? Object.assign({}, existing.valores) : {};
+    const patientOptions = state.pacientes.slice().sort((a,b)=>a.nombre.localeCompare(b.nombre)).map(p=>[p.id,pacienteLabel(p)]);
+    const html = '<div class="field"><label>Paciente</label><div id="eavollPacienteAc"></div></div>'+ 
+      '<div class="field"><label for="eavollFecha">Fecha de la prueba</label><input type="date" id="eavollFecha" value="'+esc(existing?existing.fecha:todayISO())+'"></div>'+ 
+      '<div class="eavoll-help">Introduce valores pares entre 0 y 100. Pulsa Enter para avanzar al siguiente campo.</div>'+eavollLegendHtml()+EAVOLL_GROUPS.map(group=>eavollGroupHtml(group,values)).join('')+confirmCancelHtml(existing?'Guardar cambios':'Guardar prueba');
+    openModal(existing?'Editar prueba EAVoll':'Nueva prueba EAVoll', html, () => {
+      const pacienteId = document.getElementById('mf_eavollPaciente').value;
+      const fecha = document.getElementById('eavollFecha').value;
+      if (!pacienteId || !fecha) { showToast('Selecciona un paciente y una fecha'); return; }
+      const result = {};
+      let invalid = false;
+      document.querySelectorAll('[data-eavoll-value]').forEach(input => {
+        const value = Number(input.value);
+        if (input.value === '' || !Number.isInteger(value) || value<0 || value>100 || value%2!==0) invalid = true;
+        result[input.dataset.eavollValue] = value;
+      });
+      if (invalid) { showToast('Todos los valores deben ser pares entre 0 y 100'); return; }
+      if (existing) { existing.pacienteId=pacienteId; existing.fecha=fecha; existing.valores=result; }
+      else state.eavoll.push({ id:uid(), pacienteId, fecha, valores:result });
+      save(); closeModal();
+    });
+    renderAutocomplete('eavollPacienteAc', 'mf_eavollPaciente', state.pacientes.slice().sort((a,b)=>a.nombre.localeCompare(b.nombre)), pacienteLabel, p=>p.telefono, null, 'Buscar por nombre, número o teléfono…');
+    if (existing) {
+      const patient = paciente(existing.pacienteId);
+      if (patient) {
+        document.getElementById('mf_eavollPaciente').value = patient.id;
+        document.getElementById('eavollPacienteAc_input').value = pacienteLabel(patient);
+      }
+    }
+    wireEavollInputs(document.getElementById('modalBackdrop'));
   }
 
   /* ================= RECORDATORIOS WHATSAPP ================= */
