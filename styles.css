@@ -115,18 +115,21 @@ main#content { flex:1; padding:14px 14px calc(90px + env(safe-area-inset-bottom,
 .eavoll-legend div { display:inline-flex; align-items:center; gap:4px; }
 .eavoll-legend i { width:14px; height:14px; display:inline-block; border:1px solid var(--border); }
 .eavoll-group { margin:18px 0; }
-.eavoll-group h3 { font-size:15px; margin:0 0 8px; }
-.eavoll-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:6px; }
-.eavoll-cell { display:flex; align-items:center; justify-content:space-between; gap:8px; min-width:0; padding:7px 8px; border:1px solid var(--border); border-radius:8px; color:#1c1e26; font-size:12px; }
-.eavoll-cell span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.eavoll-value { width:58px; flex:0 0 58px; padding:6px 5px; border:1px solid rgba(0,0,0,.2); border-radius:6px; color:#1c1e26; text-align:center; font-weight:700; }
+.eavoll-group h3 { font-size:14px; margin:0 0 5px; }
+.eavoll-matrix { display:grid; grid-template-columns:minmax(0,1fr) 56px 56px; gap:1px 3px; align-items:stretch; }
+.eavoll-matrix-heading { background:#fff; color:#111; text-align:center; font-size:12px; font-weight:600; padding:5px 2px; }
+.eavoll-zone { min-width:0; display:flex; align-items:center; padding:3px 7px; border:1px solid var(--border); background:#fff; color:#111; font-size:12px; line-height:1.1; }
+.eavoll-cell { display:flex; align-items:center; justify-content:center; min-width:0; border:1px solid var(--border); }
+.eavoll-value { width:100%; min-width:0; height:25px; padding:2px; border:0; border-radius:0; color:#1c1e26; text-align:center; font-size:13px; font-weight:600; }
+.eavoll-value::placeholder { color:#52525b; opacity:1; font-size:10px; font-weight:400; }
 .eavoll-green { background:#b7e4c7; }
 .eavoll-yellow { background:#ffe69a; }
 .eavoll-white { background:#fff; }
 .eavoll-orange { background:#f6b26b; }
-.eavoll-fuchsia { background:#d94df5; color:#fff; }
+.eavoll-fuchsia { background:#FF8AE2; color:#111; }
 .eavoll-invalid { background:var(--surface-2); }
-.eavoll-value.eavoll-fuchsia { color:#fff; }
+.eavoll-value.eavoll-fuchsia { color:#111; }
 @media (max-width:480px) {
-  .eavoll-grid { grid-template-columns:1fr; }
+  .eavoll-matrix { grid-template-columns:minmax(0,1fr) 52px 52px; gap:1px 2px; }
+  .eavoll-zone { padding:3px 5px; font-size:11px; }
 }

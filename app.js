@@ -805,17 +805,23 @@
     if (n<=78) return 'eavoll-orange';
     return 'eavoll-fuchsia';
   }
-  function eavollInputHtml(code, value){
-    return '<input class="eavoll-value '+eavollColorClass(value)+'" type="number" min="0" max="100" step="2" data-eavoll-value="'+code+'" value="'+(value==null?'':esc(value))+'">';
+  function eavollInputHtml(code, value, order){
+    return '<input class="eavoll-value '+eavollColorClass(value)+'" type="number" min="0" max="100" step="2" tabindex="'+order+'" data-eavoll-order="'+order+'" data-eavoll-value="'+code+'" placeholder="'+code+'" value="'+(value==null?'':esc(value))+'">';
   }
-  function eavollGroupHtml(group, values){
-    return '<section class="eavoll-group"><h3>'+group.label+'</h3><div class="eavoll-grid">'+group.zones.map((zone,index) => {
-      const code = group.prefix+(index+1);
-      return '<label class="eavoll-cell '+eavollColorClass(values[code])+'" data-eavoll-cell="'+code+'"><span>'+esc(zone)+'</span>'+eavollInputHtml(code, values[code])+'</label>';
-    }).join('')+'</div></section>';
+  function eavollMatrixHtml(title, rightGroup, leftGroup, values, orderStart){
+    const rows = rightGroup.zones.map((zone,index) => {
+      const rightCode = rightGroup.prefix+(index+1);
+      const leftCode = leftGroup.prefix+(index+1);
+      const rightOrder = orderStart+index;
+      const leftOrder = orderStart+rightGroup.zones.length+index;
+      return '<div class="eavoll-zone">'+esc(zone)+'</div>'+ 
+        '<div class="eavoll-cell '+eavollColorClass(values[rightCode])+'" data-eavoll-cell="'+rightCode+'">'+eavollInputHtml(rightCode,values[rightCode],rightOrder)+'</div>'+ 
+        '<div class="eavoll-cell '+eavollColorClass(values[leftCode])+'" data-eavoll-cell="'+leftCode+'">'+eavollInputHtml(leftCode,values[leftCode],leftOrder)+'</div>';
+    }).join('');
+    return '<section class="eavoll-group"><h3>'+title+'</h3><div class="eavoll-matrix"><div class="eavoll-matrix-heading"></div><div class="eavoll-matrix-heading">Dch</div><div class="eavoll-matrix-heading">Izq</div>'+rows+'</div></section>';
   }
   function wireEavollInputs(container){
-    const inputs = Array.from(container.querySelectorAll('[data-eavoll-value]'));
+    const inputs = Array.from(container.querySelectorAll('[data-eavoll-value]')).sort((a,b)=>Number(a.dataset.eavollOrder)-Number(b.dataset.eavollOrder));
     inputs.forEach((input,index) => {
       input.oninput = () => {
         const cell = input.closest('[data-eavoll-cell]');
@@ -850,7 +856,7 @@
       return '<tr><td>'+esc(zone)+'</td><td class="'+eavollColorClass(value)+'">'+value+'</td></tr>';
     }).join('')+'</table></section>';
     const rows = '<div class="report-row">'+reportGroup(EAVOLL_GROUPS[0])+reportGroup(EAVOLL_GROUPS[1])+'</div><div class="report-row">'+reportGroup(EAVOLL_GROUPS[2])+reportGroup(EAVOLL_GROUPS[3])+'</div>';
-    const report = '<!doctype html><html lang="es"><head><meta charset="UTF-8"><title>'+esc(pdfName)+'</title><style>@page{size:A4;margin:8mm}*{box-sizing:border-box}body{font-family:Arial,sans-serif;color:#111;margin:0;-webkit-print-color-adjust:exact;print-color-adjust:exact}h1{font-size:20px;margin:0 0 2px}h2{font-size:13px;margin:0 0 3px}p{font-size:11px;margin:2px 0 6px;color:#444}.report-row{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);width:96%;gap:5px;margin-bottom:5px}.report-section{min-width:0}table{border-collapse:collapse;width:100%;table-layout:fixed}td{border:1px solid #999;padding:2px 4px;font-size:10px;line-height:1.05}td:first-child{width:auto}td:last-child{width:32px;text-align:center;font-weight:bold}.eavoll-green{background:#b7e4c7!important;-webkit-print-color-adjust:exact;print-color-adjust:exact}.eavoll-yellow{background:#ffe69a!important;-webkit-print-color-adjust:exact;print-color-adjust:exact}.eavoll-white{background:#fff!important;-webkit-print-color-adjust:exact;print-color-adjust:exact}.eavoll-orange{background:#f6b26b!important;-webkit-print-color-adjust:exact;print-color-adjust:exact}.eavoll-fuchsia{background:#d94df5!important;color:#fff!important;-webkit-print-color-adjust:exact;print-color-adjust:exact}.legend{margin-top:5px;display:flex;flex-wrap:wrap;gap:3px 7px;font-size:9px}.legend span{display:inline-flex;align-items:center;gap:3px}.legend i{display:inline-block;width:11px;height:11px;border:1px solid #777}</style></head><body><h1>Prueba EAVoll</h1><p><b>Paciente:</b> '+esc(patient?patient.nombre:'Paciente eliminado')+'<br><b>Fecha:</b> '+esc(record.fecha)+'</p>'+rows+'<div class="legend"><span><i class="eavoll-green"></i>Degeneración [0 - 30]</span><span><i class="eavoll-yellow"></i>Deficiencia [30 - 40]</span><span><i class="eavoll-white"></i>Normal [40 - 60]</span><span><i class="eavoll-orange"></i>Irritación [60 - 80]</span><span><i class="eavoll-fuchsia"></i>Inflamación [80 - 100]</span></div><script>window.onload=function(){window.print()}<\/script></body></html>';
+    const report = '<!doctype html><html lang="es"><head><meta charset="UTF-8"><title>'+esc(pdfName)+'</title><style>@page{size:A4;margin:8mm}*{box-sizing:border-box}body{font-family:Arial,sans-serif;color:#111;margin:0;-webkit-print-color-adjust:exact;print-color-adjust:exact}h1{font-size:20px;margin:0 0 2px}h2{font-size:13px;margin:0 0 3px}p{font-size:11px;margin:2px 0 6px;color:#444}.report-row{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);width:96%;gap:5px;margin-bottom:5px}.report-section{min-width:0}table{border-collapse:collapse;width:100%;table-layout:fixed}td{border:1px solid #999;padding:2px 4px;font-size:10px;line-height:1.05}td:first-child{width:auto}td:last-child{width:32px;text-align:center;font-weight:bold}.eavoll-green{background:#b7e4c7!important;-webkit-print-color-adjust:exact;print-color-adjust:exact}.eavoll-yellow{background:#ffe69a!important;-webkit-print-color-adjust:exact;print-color-adjust:exact}.eavoll-white{background:#fff!important;-webkit-print-color-adjust:exact;print-color-adjust:exact}.eavoll-orange{background:#f6b26b!important;-webkit-print-color-adjust:exact;print-color-adjust:exact}.eavoll-fuchsia{background:#F527BB!important;color:#111!important;-webkit-print-color-adjust:exact;print-color-adjust:exact}.legend{margin-top:5px;display:flex;flex-wrap:wrap;gap:3px 7px;font-size:9px}.legend span{display:inline-flex;align-items:center;gap:3px}.legend i{display:inline-block;width:11px;height:11px;border:1px solid #777}</style></head><body><h1>Prueba EAVoll</h1><p><b>Paciente:</b> '+esc(patient?patient.nombre:'Paciente eliminado')+'<br><b>Fecha:</b> '+esc(record.fecha)+'</p>'+rows+'<div class="legend"><span><i class="eavoll-green"></i>Degeneración [0 - 30]</span><span><i class="eavoll-yellow"></i>Deficiencia [30 - 40]</span><span><i class="eavoll-white"></i>Normal [40 - 60]</span><span><i class="eavoll-orange"></i>Irritación [60 - 80]</span><span><i class="eavoll-fuchsia"></i>Inflamación [80 - 100]</span></div><script>window.onload=function(){window.print()}<\/script></body></html>';
     const printWindow = window.open('', '_blank');
     if (!printWindow) { showToast('Permite las ventanas emergentes para generar el PDF'); return; }
     printWindow.document.write(report);
@@ -888,7 +894,7 @@
     const patientOptions = state.pacientes.slice().sort((a,b)=>a.nombre.localeCompare(b.nombre)).map(p=>[p.id,pacienteLabel(p)]);
     const html = '<div class="field"><label>Paciente</label><div id="eavollPacienteAc"></div></div>'+ 
       '<div class="field"><label for="eavollFecha">Fecha de la prueba</label><input type="date" id="eavollFecha" value="'+esc(existing?existing.fecha:todayISO())+'"></div>'+ 
-      '<div class="eavoll-help">Introduce valores pares entre 0 y 100. Pulsa Enter para avanzar al siguiente campo.</div>'+eavollLegendHtml()+EAVOLL_GROUPS.map(group=>eavollGroupHtml(group,values)).join('')+confirmCancelHtml(existing?'Guardar cambios':'Guardar prueba');
+      '<div class="eavoll-help">Introduce valores pares entre 0 y 100. Pulsa Enter para avanzar al siguiente campo.</div>'+eavollLegendHtml()+eavollMatrixHtml('Manos',EAVOLL_GROUPS[0],EAVOLL_GROUPS[1],values,1)+eavollMatrixHtml('Pies',EAVOLL_GROUPS[2],EAVOLL_GROUPS[3],values,21)+confirmCancelHtml(existing?'Guardar cambios':'Guardar prueba');
     openModal(existing?'Editar prueba EAVoll':'Nueva prueba EAVoll', html, () => {
       const pacienteId = document.getElementById('mf_eavollPaciente').value;
       const fecha = document.getElementById('eavollFecha').value;
