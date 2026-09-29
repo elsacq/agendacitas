@@ -234,7 +234,7 @@
   let agendaWeekStart = null; // se inicializa en boot
   let agendaSelectedDate = null;
   let agendaShowPast = false, agendaFilterEstado = '', agendaSearch = '';
-  let pacientesSearch = '', terapiasSearch = '';
+  let pacientesSearch = '', terapiasSearch = '', terapiasSoloActivas = false;
 
   const FORMAS_PAGO = [['efectivo','Efectivo'],['tarjeta','Tarjeta'],['transferencia','Transferencia'],['bizum','Bizum']];
   const ESTADOS_CITA = [['pendiente','Pendiente'],['en_consulta','En consulta'],['finalizada','Finalizada'],['anulada','Anulada']];
@@ -517,19 +517,27 @@
       '<div class="titlebox" style="text-align:right"><div class="t1">'+esc(p?pacienteLabel(p):'Paciente eliminado')+'</div><div class="t2">'+esc(t?t.nombre:'—')+'</div></div></div>'+
       '<div class="badges"><span class="badge estado-'+ci.estado+'">'+labelEstado(ci.estado)+'</span>'+
       '<span class="badge pago-'+ci.pagoEstado+'">'+pagoLabel+(ci.formaPago?' · '+labelForma(ci.formaPago):'')+'</span>'+
+      (bonoSesionLabel(ci) ? '<span class="badge pago-bono">Sesión '+bonoSesionLabel(ci)+'</span>' : '')+
       (ci.pagoEstado!=='bono' ? '<span class="badge" style="background:var(--surface-2);color:var(--text-dim)">'+euros(ci.precio)+'</span>' : '')+
       (ci.googleEventId ? '<span class="badge" style="background:var(--surface-2);color:var(--text-dim)">📅 Google</span>' : '')+'</div>'+
       (ci.notas ? '<div class="hint" style="margin-top:8px">'+esc(ci.notas)+'</div>' : '')+
       '<div class="actions">'+
       (ci.estado!=='anulada' && ci.estado!=='finalizada' ? '<button class="btn small secondary" data-act="estado" data-next="'+nextEstado(ci.estado)+'">→ '+labelEstado(nextEstado(ci.estado))+'</button>' : '')+
       (ci.pagoEstado==='pendiente' ? '<button class="btn small secondary" data-act="pagar">💶 Marcar pagada</button>' : '')+
-      (ci.estado!=='anulada' && !bloqueada ? '<button class="btn small secondary" data-act="reagendar">🗓️ Reagendar</button>' : '')+
+      (ci.estado!=='anulada' && !bloqueada ? '<button class="btn small secondary" data-act="reagendar">Cambiar</button>' : '')+
       (ci.estado!=='anulada' && !bloqueada ? '<button class="btn small danger" data-act="anular">Anular</button>' : '')+
       '</div></div>';
   }
   function labelEstado(e){ return (ESTADOS_CITA.find(x=>x[0]===e)||['',''])[1]; }
   function labelForma(f){ return (FORMAS_PAGO.find(x=>x[0]===f)||['',''])[1]; }
   function nextEstado(e){ return e==='pendiente' ? 'en_consulta' : 'finalizada'; }
+  function bonoSesionLabel(ci){
+    if (!ci.bonoId) return '';
+    const b = bono(ci.bonoId); if (!b) return '';
+    const sesiones = state.citas.filter(x=>x.bonoId===ci.bonoId && x.estado!=='anulada').slice().sort((a,b)=>(a.fecha+a.hora+a.id).localeCompare(b.fecha+b.hora+b.id));
+    const index = sesiones.findIndex(x=>x.id===ci.id);
+    return index<0 ? '' : (index+1)+'/'+b.sesionesTotales;
+  }
 
   function wireCitaCardActions(){
     document.querySelectorAll('.card[data-cita]').forEach(card => {
@@ -569,12 +577,38 @@
     });
   }
   function openReagendarModal(ci){
-    openModal('Reagendar cita', modalFieldsHtml([{ type:'date', id:'fecha', label:'Fecha', value:ci.fecha },{ type:'time', id:'hora', label:'Hora', value:ci.hora }]) + confirmCancelHtml('Guardar'), () => {
+    const terapiasOpts = state.terapias.filter(t=>t.activa!==false || t.id===ci.terapiaId).slice().sort((a,b)=>a.nombre.localeCompare(b.nombre)).map(t=>[t.id,t.nombre+(t.activa===false?' · inactiva':'')]);
+    openModal('Cambiar cita', modalFieldsHtml([{ type:'select', id:'terapia', label:'Terapia / consulta', options:terapiasOpts, value:ci.terapiaId },{ type:'date', id:'fecha', label:'Fecha', value:ci.fecha },{ type:'time', id:'hora', label:'Hora', value:ci.hora }]) + confirmCancelHtml('Guardar cambios'), () => {
+      const terapiaId = document.getElementById('mf_terapia').value;
+      if (terapiaId!==ci.terapiaId && ci.pagoEstado==='pagada' && !confirm('Al cambiar la terapia se recalculará el cobro y la cita quedará pendiente de pago. Esta app no registra devoluciones del pago anterior. ¿Continuar?')) return;
       ci.fecha=document.getElementById('mf_fecha').value; ci.hora=document.getElementById('mf_hora').value;
+      if (terapiaId!==ci.terapiaId) cambiarTerapiaCita(ci, terapia(terapiaId));
       if (ci.estado==='anulada') ci.estado='pendiente';
       save(); closeModal();
       syncCita(ci).then(render);
     });
+  }
+
+  function cambiarTerapiaCita(ci, nuevaTerapia){
+    if (!nuevaTerapia) return;
+    if (ci.bonoId) {
+      const anterior = bono(ci.bonoId);
+      if (anterior) {
+        const tieneOtrasCitas = state.citas.some(x=>x.id!==ci.id && x.bonoId===anterior.id);
+        if (anterior.creadoPorCitaId===ci.id && !tieneOtrasCitas && !anterior.pagado) state.bonos=state.bonos.filter(x=>x.id!==anterior.id);
+        else anterior.sesionesRestantes=Math.min(anterior.sesionesTotales,anterior.sesionesRestantes+1);
+      }
+    }
+    ci.terapiaId=nuevaTerapia.id; ci.duracion=nuevaTerapia.duracion; ci.bonoId=null;
+    ci.formaPago=null;
+    if (nuevaTerapia.esBono) {
+      const activo=bonoActivo(ci.pacienteId,nuevaTerapia.id);
+      if (activo) { activo.sesionesRestantes-=1; ci.bonoId=activo.id; ci.precio=0; ci.pagoEstado='bono'; ci.formaPago=activo.formaPago; }
+      else {
+        const nuevoBono={ id:uid(), pacienteId:ci.pacienteId, terapiaId:nuevaTerapia.id, sesionesTotales:nuevaTerapia.sesiones, sesionesRestantes:nuevaTerapia.sesiones-1, fechaCompra:ci.fecha, pagado:false, formaPago:null, creadoPorCitaId:ci.id };
+        state.bonos.push(nuevoBono); ci.bonoId=nuevoBono.id; ci.precio=nuevaTerapia.precio; ci.pagoEstado='pendiente';
+      }
+    } else { ci.precio=nuevaTerapia.precio; ci.pagoEstado='pendiente'; }
   }
 
   function pacienteLabel(p){ return p.nombre + (p.numero ? ' ('+p.numero+')' : ''); }
@@ -589,7 +623,7 @@
       nombre: normalizeName(p.nombre),
       telefono: normalizeContactPhone(p.telefono)
     }));
-    data.terapias = (data.terapias||[]).map(t => Object.assign({}, t, { nombre: normalizeName(t.nombre) }));
+    data.terapias = (data.terapias||[]).map(t => Object.assign({}, t, { nombre: normalizeName(t.nombre), activa: t.activa!==false }));
     return data;
   }
 
@@ -632,16 +666,17 @@
 
   function openCitaModal(defaultFecha){
     if (state.pacientes.length===0) { showToast('Añade primero un paciente'); return; }
-    if (state.terapias.length===0) { showToast('Añade primero una terapia'); return; }
+    const terapiasActivas = state.terapias.filter(t=>t.activa!==false);
+    if (terapiasActivas.length===0) { showToast('Activa una terapia antes de agendar'); return; }
     const pacientesOrdenados = state.pacientes.slice().sort((a,b)=>a.nombre.localeCompare(b.nombre));
-    const terapiasOpts = state.terapias.slice().sort((a,b)=>a.nombre.localeCompare(b.nombre)).map(t=>[t.id, t.nombre+(t.esBono?' · bono '+t.sesiones+' ses.':' · '+euros(t.precio))]);
+    const terapiasOpts = terapiasActivas.slice().sort((a,b)=>a.nombre.localeCompare(b.nombre)).map(t=>[t.id, t.nombre+(t.esBono?' · bono '+t.sesiones+' ses.':' · '+euros(t.precio))]);
     const bodyId = 'citaDynamic';
     let html = '<div class="field"><label>Paciente</label><div id="pacienteAc"></div></div>' +
       modalFieldsHtml([
         { type:'select', id:'terapia', label:'Terapia / consulta', options: terapiasOpts },
         { type:'date', id:'fecha', label:'Fecha', value: defaultFecha || todayISO() },
         { type:'time', id:'hora', label:'Hora', value: nowHM() }
-      ]);
+      ]) + '<div class="field"><label for="mf_notas">Notas u observaciones</label><textarea id="mf_notas" rows="3" placeholder="Añadir una observación (opcional)"></textarea></div>';
     html += '<div id="'+bodyId+'"></div>' + confirmCancelHtml('Agendar cita');
     openModal('Nueva cita', html, () => {
       const pacienteId = document.getElementById('mf_paciente').value;
@@ -733,16 +768,18 @@
     const c = document.getElementById('content');
     const all = state.terapias.slice().sort((a,b)=>a.nombre.localeCompare(b.nombre));
     const query = terapiasSearch.trim().toLowerCase();
-    const list = query ? all.filter(t => t.nombre.toLowerCase().includes(query)) : all;
-    let html = '<div class="toolbar"><input type="search" id="terapiasSearch" placeholder="Buscar terapia o consulta…" value="'+esc(terapiasSearch)+'"></div>';
+    const filtered = terapiasSoloActivas ? all.filter(t=>t.activa!==false) : all;
+    const list = query ? filtered.filter(t => t.nombre.toLowerCase().includes(query)) : filtered;
+    let html = '<div class="toolbar"><input type="search" id="terapiasSearch" placeholder="Buscar terapia o consulta…" value="'+esc(terapiasSearch)+'"><select id="terapiasEstado"><option value="todas">Todas</option><option value="activas"'+(terapiasSoloActivas?' selected':'')+'>Sólo activas</option></select></div>';
     if (all.length===0) html += '<div class="empty">Todavía no hay terapias o consultas.<br><br><button class="btn ghost" id="emptyNewT">+ Nueva terapia</button></div>';
-    else if (list.length===0) html += '<div class="empty">No hay terapias que coincidan con la búsqueda.</div>';
+    else if (list.length===0) html += '<div class="empty">'+(terapiasSoloActivas?'No hay terapias activas que mostrar.':'No hay terapias que coincidan con la búsqueda.')+'</div>';
     else html += list.map(t => (
       '<div class="card"><div class="row1"><div class="titlebox"><div class="t1">'+esc(t.nombre)+'</div>'+
-      '<div class="t2">'+t.duracion+' min · '+(t.esBono? 'Bono de '+t.sesiones+' sesiones · '+euros(t.precio)+' total' : euros(t.precio))+'</div></div></div>'+
+      '<div class="t2">'+t.duracion+' min · '+(t.esBono? 'Bono de '+t.sesiones+' sesiones · '+euros(t.precio)+' total' : euros(t.precio))+' · '+(t.activa===false?'Inactiva':'Activa')+'</div></div></div>'+ 
       '<div class="actions"><button class="btn small secondary" data-edit="'+t.id+'">Editar</button><button class="btn small danger" data-del="'+t.id+'">Eliminar</button></div></div>'
     )).join('');
     c.innerHTML = html;
+    document.getElementById('terapiasEstado').onchange = e => { terapiasSoloActivas=e.target.value==='activas'; renderTerapias(); };
     document.getElementById('terapiasSearch').oninput = e => {
       terapiasSearch=e.target.value;
       renderTerapias();
@@ -763,7 +800,8 @@
     const html = modalFieldsHtml([
       { type:'text', id:'nombre', label:'Nombre de la terapia / consulta', value: existing?existing.nombre:'' },
       { type:'number', id:'duracion', label:'Duración a reservar (minutos)', value: existing?existing.duracion:30 }
-    ]) + '<div class="field checkrow"><input type="checkbox" id="mf_esBono" '+(existing&&existing.esBono?'checked':'')+'><label for="mf_esBono" style="margin:0">Es un bono de varias sesiones</label></div>'
+    ]) + '<div class="field checkrow"><input type="checkbox" id="mf_activa" '+(!existing||existing.activa!==false?'checked':'')+'><label for="mf_activa" style="margin:0">Terapia activa</label></div>'
+      + '<div class="field checkrow"><input type="checkbox" id="mf_esBono" '+(existing&&existing.esBono?'checked':'')+'><label for="mf_esBono" style="margin:0">Es un bono de varias sesiones</label></div>'
       + '<div id="terapiaDynamic"></div>' + confirmCancelHtml(existing?'Guardar':'Añadir terapia');
     openModal(existing?'Editar terapia':'Nueva terapia', html, () => {
       const nombre = normalizeName(document.getElementById('mf_nombre').value);
@@ -772,8 +810,9 @@
       const precio = parseFloat(document.getElementById('mf_precio').value)||0;
       const sesiones = esBono ? (parseInt(document.getElementById('mf_sesiones').value,10)||1) : null;
       if (!nombre) { showToast('El nombre es obligatorio'); return; }
-      if (existing) { existing.nombre=nombre; existing.duracion=duracion; existing.esBono=esBono; existing.precio=precio; existing.sesiones=sesiones; }
-      else state.terapias.push({ id: uid(), nombre, duracion, esBono, precio, sesiones });
+      const activa=document.getElementById('mf_activa').checked;
+      if (existing) { existing.nombre=nombre; existing.duracion=duracion; existing.esBono=esBono; existing.precio=precio; existing.sesiones=sesiones; existing.activa=activa; }
+      else state.terapias.push({ id: uid(), nombre, duracion, esBono, precio, sesiones, activa });
       save(); closeModal();
     });
     const updateDynamic = () => {
@@ -1059,7 +1098,7 @@
   function modalFieldsHtml(fields){
     return fields.map(f => {
       const id='mf_'+f.id; let input;
-      if (f.type==='select') input = '<select id="'+id+'">'+f.options.map(o=>'<option value="'+esc(o[0])+'">'+esc(o[1])+'</option>').join('')+'</select>';
+      if (f.type==='select') input = '<select id="'+id+'">'+f.options.map(o=>'<option value="'+esc(o[0])+'"'+(f.value===o[0]?' selected':'')+'>'+esc(o[1])+'</option>').join('')+'</select>';
       else if (f.type==='number') input = '<input type="number" id="'+id+'" value="'+esc(f.value)+'" '+(f.step?'step="'+f.step+'"':'')+'>';
       else input = '<input type="'+f.type+'" id="'+id+'" value="'+esc(f.value)+'">';
       return '<div class="field"><label for="'+id+'">'+esc(f.label)+'</label>'+input+'</div>';
